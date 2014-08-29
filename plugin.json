@@ -1,0 +1,11 @@
+{
+    "id": "nodebb-plugin-import-vbulletin",
+    "name": "nodebb-plugin-import-vbulletin",
+    "description": "A VBulletin to NodeBB data exporter",
+    "url": "https://github.com/akhoury/nodebb-plugin-import-vbulletin",
+	"library": "./admin/index.js",
+	"hooks": [
+		{ "hook": "filter:admin.header.build", "method": "admin.menu", "callbacked": false },
+		{ "hook": "filter:admin.create_routes", "method": "admin.route", "callbacked": true }
+	]
+}
