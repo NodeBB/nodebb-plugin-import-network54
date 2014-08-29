@@ -31,18 +31,6 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
         callback(null, Exporter.config());
     };
 
-    function getFilter(query, next) {
-        Exporter.connection.query(query, {}, function(err, rows) {
-            if(err) { console.log(err); console.log(query); }
-
-            var ids = [];
-            rows.forEach(function(row) {
-                ids.push(row.id);
-            });
-            next(null, '(' + ids.join(',') + ')');
-        });
-    }
-
     Exporter.getUsers = function(callback) {
         Exporter.log('getUsers');
         callback = !_.isFunction(callback) ? noop : callback;
