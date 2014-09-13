@@ -31,6 +31,62 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
         callback(null, Exporter.config());
     };
 
+    var getGroups = function(config, callback) {
+        Exporter.log('getGroups');
+        if (_.isFunction(config)) {
+            callback = config;
+            config = {};
+        }
+        callback = !_.isFunction(callback) ? noop : callback;
+        if (!Exporter.connection) {
+            Exporter.setup(config);
+        }
+        var prefix = Exporter.config('prefix');
+        var query = 'SELECT '
+            + prefix + 'usergroup.usergroupid as _gid, '
+            + prefix + 'usergroup.title as _title, ' // not sure, just making an assumption
+            + prefix + 'usergroup.pmppermissions as _pmppermissions, ' // not sure, just making an assumption
+            + prefix + 'usergroup.adminpermissions as _adminpermissions ' // not sure, just making an assumption
+            + ' from ' + prefix + 'usergroup ';
+        Exporter.connection.query(query,
+            function(err, rows) {
+                if (err) {
+                    Exporter.error(err);
+                    return callback(err);
+                }
+                var map = {};
+
+                //figure out the admin group
+                var max = 0, admingid;
+                rows.forEach(function(row) {
+                    var adminpermission = parseInt(row.pmppermissions, 10);
+                    if (adminpermission) {
+                        if (adminpermission > max) {
+                            max = adminpermission;
+                            admingid = row._gid;
+                        }
+                    }
+                });
+
+                rows.forEach(function(row) {
+                    if (! parseInt(row.pmppermissions, 10)) {
+                        row._banned = 1;
+                        row._level = 'member';
+                    } else if (parseInt(row.pmppermissions, 10)) {
+                        row._level = row._gid === admingid ? 'administrator' : 'moderator';
+                        row._banned = 0;
+                    } else {
+                        row._level = 'member';
+                        row._banned = 0;
+                    }
+                    map[row._gid] = row;
+                });
+                // keep a copy of the users in memory here
+                Exporter._groups = map;
+                callback(null, map);
+            });
+    };
+
     Exporter.getUsers = function(callback) {
         Exporter.log('getUsers');
         callback = !_.isFunction(callback) ? noop : callback;
@@ -43,9 +99,10 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             + prefix + 'user.userid as _uid, '
             + prefix + 'user.email as _email, '
             + prefix + 'user.username as _username, '
-            + prefix + 'user.signatureparsed as _signature, '
+            + prefix + 'sigparsed.signatureparsed as _signature, '
             + prefix + 'user.joindate as _joindate, '
             + prefix + 'user.homepage as _website, '
+            + prefix + 'user.reputation as _reputation, '
             + prefix + 'user.profilevisits as _profileviews, '
             + prefix + 'user.birthday as _birthday'
             + 'FROM ' + prefix + 'user '
@@ -57,48 +114,53 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             return callback(err);
         }
 
-        Exporter.connection.query(query,
-            function(err, rows) {
-                if (err) {
-                    Exporter.error(err);
-                    return callback(err);
-                }
-
-                //normalize here
-                var map = {};
-                rows.forEach(function(row) {
-                    if (row._username && row._email) {
-
-                        // nbb forces signatures to be less than 150 chars
-                        // keeping it HTML see https://github.com/akhoury/nodebb-plugin-import#markdown-note
-                        row._signature = Exporter.truncateStr(row._signature || '', 150);
-
-                        // from unix timestamp (s) to JS timestamp (ms)
-                        row._joindate = ((row._joindate || 0) * 1000) || startms;
-
-                        // lower case the email for consistency
-                        row._email = row._email.toLowerCase();
-
-                        // I don't know about you about I noticed a lot my users have incomplete urls, urls like: http://
-                        row._picture = Exporter.validateUrl(row._picture);
-                        row._website = Exporter.validateUrl(row._website);
-
-                        map[row._uid] = row;
-                    } else {
-                        var requiredValues = [row._username, row._email];
-                        var requiredKeys = ['_username','_email'];
-                        var falsyIndex = Exporter.whichIsFalsy(requiredValues);
-
-                        Exporter.warn('Skipping user._uid: ' + row._uid + ' because ' + requiredKeys[falsyIndex] + ' is falsy. Value: ' + requiredValues[falsyIndex]);
-
+        getGroups(function(err, groups) {
+            Exporter.connection.query(query,
+                function(err, rows) {
+                    if (err) {
+                        Exporter.error(err);
+                        return callback(err);
                     }
+
+                    //normalize here
+                    var map = {};
+                    rows.forEach(function(row) {
+                        if (row._username && row._email) {
+
+                            // nbb forces signatures to be less than 150 chars
+                            // keeping it HTML see https://github.com/akhoury/nodebb-plugin-import#markdown-note
+                            row._signature = Exporter.truncateStr(row._signature || '', 150);
+
+                            // from unix timestamp (s) to JS timestamp (ms)
+                            row._joindate = ((row._joindate || 0) * 1000) || startms;
+
+                            // lower case the email for consistency
+                            row._email = row._email.toLowerCase();
+
+                            // I don't know about you about I noticed a lot my users have incomplete urls, urls like: http://
+                            row._picture = Exporter.validateUrl(row._picture);
+                            row._website = Exporter.validateUrl(row._website);
+
+                            row._level = (groups[row_gid] || {})._level || '';
+                            row._banned = (groups[row_gid] || {})._banned || 0;
+
+                            map[row._uid] = row;
+                        } else {
+                            var requiredValues = [row._username, row._email];
+                            var requiredKeys = ['_username','_email'];
+                            var falsyIndex = Exporter.whichIsFalsy(requiredValues);
+
+                            Exporter.warn('Skipping user._uid: ' + row._uid + ' because ' + requiredKeys[falsyIndex] + ' is falsy. Value: ' + requiredValues[falsyIndex]);
+
+                        }
+                    });
+
+                    // keep a copy of the users in memory here
+                    Exporter._users = map;
+
+                    callback(null, map);
                 });
-
-                // keep a copy of the users in memory here
-                Exporter._users = map;
-
-                callback(null, map);
-            });
+        });
     };
 
     Exporter.getCategories = function(callback) {
