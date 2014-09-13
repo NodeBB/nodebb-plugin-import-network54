@@ -14,16 +14,16 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
         // extract them from the configs passed by the nodebb-plugin-import adapter
         var _config = {
             host: config.dbhost || config.host || 'localhost',
-            user: config.dbuser || config.user || 'root',
-            password: config.dbpass || config.pass || config.password || '',
+            user: config.dbuser || config.user || 'user',
+            password: config.dbpass || config.pass || config.password || 'password',
             port: config.dbport || config.port || 3306,
-            database: config.dbname || config.name || config.database || 'vbulletin'
+            database: config.dbname || config.name || config.database || 'vb'
         };
 
         Exporter.log(_config);
 
         Exporter.config(_config);
-        Exporter.config('prefix', config.prefix || config.tablePrefix || 'vb_');
+        Exporter.config('prefix', config.prefix || config.tablePrefix || '');
 
         Exporter.connection = mysql.createConnection(_config);
         Exporter.connection.connect();
@@ -45,7 +45,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
         var query = 'SELECT '
             + prefix + 'usergroup.usergroupid as _gid, '
             + prefix + 'usergroup.title as _title, ' // not sure, just making an assumption
-            + prefix + 'usergroup.pmppermissions as _pmppermissions, ' // not sure, just making an assumption
+            + prefix + 'usergroup.pmpermissions as _pmpermissions, ' // not sure, just making an assumption
             + prefix + 'usergroup.adminpermissions as _adminpermissions ' // not sure, just making an assumption
             + ' from ' + prefix + 'usergroup ';
         Exporter.connection.query(query,
@@ -59,7 +59,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
                 //figure out the admin group
                 var max = 0, admingid;
                 rows.forEach(function(row) {
-                    var adminpermission = parseInt(row.pmppermissions, 10);
+                    var adminpermission = parseInt(row._adminpermissions, 10);
                     if (adminpermission) {
                         if (adminpermission > max) {
                             max = adminpermission;
@@ -69,10 +69,10 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
                 });
 
                 rows.forEach(function(row) {
-                    if (! parseInt(row.pmppermissions, 10)) {
+                    if (! parseInt(row._pmpermissions, 10)) {
                         row._banned = 1;
                         row._level = 'member';
-                    } else if (parseInt(row.pmppermissions, 10)) {
+                    } else if (parseInt(row._adminpermissions, 10)) {
                         row._level = row._gid === admingid ? 'administrator' : 'moderator';
                         row._banned = 0;
                     } else {
@@ -104,7 +104,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             + prefix + 'user.homepage as _website, '
             + prefix + 'user.reputation as _reputation, '
             + prefix + 'user.profilevisits as _profileviews, '
-            + prefix + 'user.birthday as _birthday'
+            + prefix + 'user.birthday as _birthday '
             + 'FROM ' + prefix + 'user '
             + 'LEFT JOIN ' + prefix + 'sigparsed ON ' + prefix + 'sigparsed.userid=' + prefix + 'user.userid ';
 
@@ -141,8 +141,8 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
                             row._picture = Exporter.validateUrl(row._picture);
                             row._website = Exporter.validateUrl(row._website);
 
-                            row._level = (groups[row_gid] || {})._level || '';
-                            row._banned = (groups[row_gid] || {})._banned || 0;
+                            row._level = (groups[row._gid] || {})._level || '';
+                            row._banned = (groups[row._gid] || {})._banned || 0;
 
                             map[row._uid] = row;
                         } else {
