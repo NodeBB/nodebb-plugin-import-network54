@@ -1,6 +1,6 @@
 {
     "name": "nodebb-plugin-import-vbulletin",
-    "version": "0.0.1",
+    "version": "0.0.1-1",
     "description": "A vbulletin to NodeBB data exporter",
     "main": "./index.js",
     "scripts": {
@@ -11,7 +11,9 @@
         "url": "https://github.com/akhoury/nodebb-plugin-import-vbulletin"
     },
     "keywords": [
-        "phpbb",
+        "nodebb",
+        "vb",
+        "vbulletin",
         "plugin",
         "migrate",
         "convert",
