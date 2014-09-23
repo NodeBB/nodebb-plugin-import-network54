@@ -2,8 +2,8 @@
 var	fs = require('fs-extra'),
 	marked = require('marked'),
 	path = require('path'),
-	pkg = fs.readJsonSync('../package.json'),
-    nbbId = pkg.name.replace(/nodebb-plugin-/, ''),
+	pkg = fs.readJsonSync(path.join(__dirname + '/../package.json')),
+    	nbbId = pkg.name.replace(/nodebb-plugin-/, ''),
 	Plugin = {
 		admin: {
 			menu: function(custom_header) {
@@ -16,7 +16,7 @@ var	fs = require('fs-extra'),
 				return custom_header;
 			},
 			route: function(custom_routes, callback) {
-				fs.readFile(path.join(__dirname, '../README.md'), function(err, tpl) {
+				fs.readFile(path.join(__dirname, '/../README.md'), function(err, tpl) {
 					marked(tpl.toString(), function(err, content){
 						if (err) throw err;
 
