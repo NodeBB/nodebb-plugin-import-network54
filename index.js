@@ -32,7 +32,6 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
     };
 
     var getGroups = function(config, callback) {
-        Exporter.log('getGroups');
         if (_.isFunction(config)) {
             callback = config;
             config = {};
@@ -88,7 +87,9 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
     };
 
     Exporter.getUsers = function(callback) {
-        Exporter.log('getUsers');
+        return Exporter.getPaginatedUsers(0, -1, callback);
+    };
+    Exporter.getPaginatedUsers = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
 
         var err;
@@ -106,7 +107,9 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             + prefix + 'user.profilevisits as _profileviews, '
             + prefix + 'user.birthday as _birthday '
             + 'FROM ' + prefix + 'user '
-            + 'LEFT JOIN ' + prefix + 'sigparsed ON ' + prefix + 'sigparsed.userid=' + prefix + 'user.userid ';
+            + 'LEFT JOIN ' + prefix + 'sigparsed ON ' + prefix + 'sigparsed.userid=' + prefix + 'user.userid '
+            + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
+
 
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
@@ -125,8 +128,6 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
                     //normalize here
                     var map = {};
                     rows.forEach(function(row) {
-                        if (row._username && row._email) {
-
                             // nbb forces signatures to be less than 150 chars
                             // keeping it HTML see https://github.com/akhoury/nodebb-plugin-import#markdown-note
                             row._signature = Exporter.truncateStr(row._signature || '', 150);
@@ -135,7 +136,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
                             row._joindate = ((row._joindate || 0) * 1000) || startms;
 
                             // lower case the email for consistency
-                            row._email = row._email.toLowerCase();
+                            row._email = (row._email || '').toLowerCase();
 
                             // I don't know about you about I noticed a lot my users have incomplete urls, urls like: http://
                             row._picture = Exporter.validateUrl(row._picture);
@@ -145,18 +146,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
                             row._banned = (groups[row._gid] || {})._banned || 0;
 
                             map[row._uid] = row;
-                        } else {
-                            var requiredValues = [row._username, row._email];
-                            var requiredKeys = ['_username','_email'];
-                            var falsyIndex = Exporter.whichIsFalsy(requiredValues);
-
-                            Exporter.warn('Skipping user._uid: ' + row._uid + ' because ' + requiredKeys[falsyIndex] + ' is falsy. Value: ' + requiredValues[falsyIndex]);
-
-                        }
                     });
-
-                    // keep a copy of the users in memory here
-                    Exporter._users = map;
 
                     callback(null, map);
                 });
@@ -164,7 +154,9 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
     };
 
     Exporter.getCategories = function(callback) {
-        Exporter.log('getCategories');
+        return Exporter.getPaginatedCategories(0, -1, callback);    
+    };
+    Exporter.getPaginatedCategories = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
 
         var err;
@@ -176,7 +168,8 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             + prefix + 'forum.title as _name, '
             + prefix + 'forum.description as _description, '
             + prefix + 'forum.displayorder as _order '
-            + 'FROM ' + prefix + 'forum '; // filter added later
+            + 'FROM ' + prefix + 'forum ' // filter added later
+            + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
@@ -194,25 +187,20 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
                 //normalize here
                 var map = {};
                 rows.forEach(function(row) {
-                    if (row._name) {
-                        row._description = row._description || 'No decsciption available';
-                        row._timestamp = ((row._timestamp || 0) * 1000) || startms;
-
-                        map[row._cid] = row;
-                    } else {
-                        Exporter.warn('Skipping category._cid:' + row._cid + ' because category._name=' + row._name + ' is invalid');
-                    }
+                    row._name = row._name || 'Untitled Category '
+                    row._description = row._description || 'No decsciption available';
+                    row._timestamp = ((row._timestamp || 0) * 1000) || startms;
+                    map[row._cid] = row;
                 });
-
-                // keep a copy in memory
-                Exporter._categories = map;
 
                 callback(null, map);
             });
     };
 
     Exporter.getTopics = function(callback) {
-        Exporter.log('getTopics');
+        return Exporter.getPaginatedTopics(0, -1, callback);
+    };
+    Exporter.getPaginatedTopics = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
 
         var err;
@@ -230,7 +218,9 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             + prefix + 'thread.deletedcount as _deleted, '
             + prefix + 'thread.sticky as _pinned '
             + 'FROM ' + prefix + 'thread '
-            + 'JOIN ' + prefix + 'post ON ' + prefix + 'thread.firstpostid=' + prefix + 'post.postid';
+            + 'JOIN ' + prefix + 'post ON ' + prefix + 'thread.firstpostid=' + prefix + 'post.postid '
+            + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
+
 
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
@@ -247,40 +237,21 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
 
                 //normalize here
                 var map = {};
-                var msg = 'You must run getCategories() before you can getTopics()';
-
-                if (!Exporter._categories) {
-                    err = {error: 'Categories are not in memory. ' + msg};
-                    Exporter.error(err.error);
-                    return callback(err);
-                }
-
                 rows.forEach(function(row) {
-                    if (Exporter._categories[row._cid]) {
-
-                        row._title = row._title ? row._title[0].toUpperCase() + row._title.substr(1) : 'Untitled';
-                        row._timestamp = ((row._timestamp || 0) * 1000) || startms;
-                        row._locked = row._open ? 0 : 1;
-
-                        map[row._tid] = row;
-                    } else {
-                        var requiredValues = [Exporter._categories[row._cid]];
-                        var requiredKeys = ['category'];
-                        var falsyIndex = Exporter.whichIsFalsy(requiredValues);
-
-                        Exporter.warn('Skipping topic._tid: ' + row._tid + ' because ' + requiredKeys[falsyIndex] + ' is falsy. Value: ' + requiredValues[falsyIndex]);
-                    }
+                    row._title = row._title ? row._title[0].toUpperCase() + row._title.substr(1) : 'Untitled';
+                    row._timestamp = ((row._timestamp || 0) * 1000) || startms;
+                    row._locked = row._open ? 0 : 1;
+                    map[row._tid] = row;
                 });
-
-                // keep a copy in memory
-                Exporter._topics = map;
 
                 callback(null, map);
             });
     };
 
     Exporter.getPosts = function(callback) {
-        Exporter.log('getPosts');
+        return Exporter.getPaginatedPosts(0, -1, callback);
+    };
+    Exporter.getPaginatedPosts = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
 
         var err;
@@ -292,7 +263,8 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             + prefix + 'post.userid as _uid, '
             + prefix + 'post.pagetext as _content, '
             + prefix + 'post.dateline as _timestamp '
-            + 'FROM ' + prefix + 'post WHERE ' + prefix + 'post.parentid<>0';
+            + 'FROM ' + prefix + 'post WHERE ' + prefix + 'post.parentid<>0 '
+            + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
@@ -309,25 +281,10 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
 
                 //normalize here
                 var map = {};
-                var msg = 'You must run getTopics() before you can getPosts()';
-
-                if (!Exporter._topics) {
-                    err = {error: 'Topics are not in memory. ' + msg};
-                    Exporter.error(err.error);
-                    return callback(err);
-                }
-
                 rows.forEach(function(row) {
-                    if (Exporter._topics[row._tid] && row._content) {
-                        row._timestamp = ((row._timestamp || 0) * 1000) || startms;
-                        map[row._pid] = row;
-                    } else {
-                        var requiredValues = [Exporter._topics[row._tid], row._content];
-                        var requiredKeys = ['topic', 'content'];
-                        var falsyIndex = Exporter.whichIsFalsy(requiredValues);
-
-                        Exporter.warn('Skipping post._pid: ' + row._pid + ' because ' + requiredKeys[falsyIndex] + ' is falsy. Value: ' + requiredValues[falsyIndex]);
-                    }
+                    row._content = row._content || '';
+                    row._timestamp = ((row._timestamp || 0) * 1000) || startms;
+                    map[row._pid] = row;
                 });
 
                 callback(null, map);
@@ -358,6 +315,29 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             },
             function(next) {
                 Exporter.getPosts(next);
+            },
+            function(next) {
+                Exporter.teardown(next);
+            }
+        ], callback);
+    };
+    
+    Exporter.paginatedTestrun = function(config, callback) {
+        async.series([
+            function(next) {
+                Exporter.setup(config, next);
+            },
+            function(next) {
+                Exporter.getPaginatedUsers(0, 1000, next);
+            },
+            function(next) {
+                Exporter.getPaginatedCategories(0, 1000, next);
+            },
+            function(next) {
+                Exporter.getPaginatedTopics(0, 1000, next);
+            },
+            function(next) {
+                Exporter.getPaginatedPosts(1001, 2000, next);
             },
             function(next) {
                 Exporter.teardown(next);
