@@ -1,19 +1,16 @@
 {
-    "name": "nodebb-plugin-import-vbulletin",
-    "version": "0.0.3",
-    "description": "A vbulletin to NodeBB data exporter",
+    "name": "nodebb-plugin-import-network54",
+    "version": "0.0.1",
+    "description": "A Network54 to NodeBB data exporter",
     "main": "./index.js",
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
-    },
     "repository": {
         "type": "git",
-        "url": "https://github.com/akhoury/nodebb-plugin-import-vbulletin"
+        "url": "https://github.com/nodebb/nodebb-plugin-import-network54"
     },
     "keywords": [
         "nodebb",
         "vb",
-        "vbulletin",
+        "network54",
         "plugin",
         "migrate",
         "convert",
@@ -26,13 +23,24 @@
             "email": "bentael@gmail.com"
         },
         {
-            "name": "Mike Edwards",
-            "company": "MakerStudios"
+            "name": "Andrew Rodrigues",
+            "email": "andrew@nodebb.org",
+            "company": "NodeBB Inc."
+        },
+        {
+            "name": "Baris Usakli",
+            "email": "baris@nodebb.org",
+            "company": "NodeBB Inc."
+        },
+        {
+            "name": "Julian Lam",
+            "email": "julian@nodebb.org",
+            "company": "NodeBB Inc."
         }
     ],
     "license": "MIT",
     "bugs": {
-        "url": "https://github.com/akhoury/nodebb-plugin-import-vbulletin/issues"
+        "url": "https://github.com/nodebb/nodebb-plugin-import-network54/issues"
     },
     "dependencies": {
         "underscore": "~1.6.0",
