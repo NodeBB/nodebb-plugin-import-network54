@@ -154,7 +154,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
     };
 
     Exporter.getCategories = function(callback) {
-        return Exporter.getPaginatedCategories(0, -1, callback);    
+        return Exporter.getPaginatedCategories(0, -1, callback);
     };
     Exporter.getPaginatedCategories = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
@@ -254,16 +254,39 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
     Exporter.getPaginatedPosts = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
 
+        /*
+        network54 post schema
+CREATE TABLE `posts` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `content` text,
+  `fromIP` varchar(255) DEFAULT NULL,
+  `fullTitle` varchar(255) DEFAULT NULL,
+  `isTopPost` bit(1) DEFAULT NULL,        // IF ITS NULL NORMAL POST ELSE TOPIC
+  `legacyId` bigint(20) DEFAULT NULL,
+  `timestamp` bigint(20) DEFAULT NULL,
+  `url` varchar(255) DEFAULT NULL,
+  `author_id` int(11) DEFAULT NULL,
+  `parent_post_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `ix_url` (`url`),
+  KEY `FK_5srofo2nnf15n2hj8fb4qity7` (`author_id`),
+  KEY `FK_m4vnw2pq586dokmiu3tqemnqf` (`parent_post_id`),
+  CONSTRAINT `FK_5srofo2nnf15n2hj8fb4qity7` FOREIGN KEY (`author_id`) REFERENCES `author` (`id`),
+  CONSTRAINT `FK_m4vnw2pq586dokmiu3tqemnqf` FOREIGN KEY (`parent_post_id`) REFERENCES `posts` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=44124 DEFAULT CHARSET=latin1;
+        */
+
+
         var err;
         var prefix = Exporter.config('prefix');
         var startms = +new Date();
         var query = 'SELECT '
-            + prefix + 'post.postid as _pid, '
-            + prefix + 'post.threadid as _tid, '
-            + prefix + 'post.userid as _uid, '
-            + prefix + 'post.pagetext as _content, '
-            + prefix + 'post.dateline as _timestamp '
-            + 'FROM ' + prefix + 'post WHERE ' + prefix + 'post.parentid<>0 '
+            + prefix + 'id as _pid, '
+            + prefix + 'post.threadid as _tid, '   // WHERE DO WE GET THIS ?? -baris
+            + prefix + 'author_id as _uid, '
+            + prefix + 'content as _content, '
+            + prefix + 'timestamp as _timestamp '
+            + 'FROM ' + prefix + 'posts WHERE ' + prefix + 'isTopPost IS NULL '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
         if (!Exporter.connection) {
@@ -321,7 +344,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             }
         ], callback);
     };
-    
+
     Exporter.paginatedTestrun = function(config, callback) {
         async.series([
             function(next) {
