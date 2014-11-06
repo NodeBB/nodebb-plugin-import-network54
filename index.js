@@ -17,10 +17,8 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             user: config.dbuser || config.user || 'user',
             password: config.dbpass || config.pass || config.password || 'password',
             port: config.dbport || config.port || 3306,
-            database: config.dbname || config.name || config.database || 'network54'
+            database: config.dbname || config.name || config.database || ''
         };
-
-        Exporter.log(_config);
 
         Exporter.config(_config);
         Exporter.config('prefix', config.prefix || config.tablePrefix || '');
@@ -28,62 +26,10 @@ var logPrefix = '[nodebb-plugin-import-network54]';
         Exporter.connection = mysql.createConnection(_config);
         Exporter.connection.connect();
 
-        callback(null, Exporter.config());
-    };
-
-    var getGroups = function(config, callback) {
-        if (_.isFunction(config)) {
-            callback = config;
-            config = {};
-        }
-        callback = !_.isFunction(callback) ? noop : callback;
-        if (!Exporter.connection) {
-            Exporter.setup(config);
-        }
-        var prefix = Exporter.config('prefix');
-        var query = 'SELECT '
-            + prefix + 'usergroup.usergroupid as _gid, '
-            + prefix + 'usergroup.title as _title, ' // not sure, just making an assumption
-            + prefix + 'usergroup.pmpermissions as _pmpermissions, ' // not sure, just making an assumption
-            + prefix + 'usergroup.adminpermissions as _adminpermissions ' // not sure, just making an assumption
-            + ' from ' + prefix + 'usergroup ';
-        Exporter.connection.query(query,
-            function(err, rows) {
-                if (err) {
-                    Exporter.error(err);
-                    return callback(err);
-                }
-                var map = {};
-
-                //figure out the admin group
-                var max = 0, admingid;
-                rows.forEach(function(row) {
-                    var adminpermission = parseInt(row._adminpermissions, 10);
-                    if (adminpermission) {
-                        if (adminpermission > max) {
-                            max = adminpermission;
-                            admingid = row._gid;
-                        }
-                    }
-                });
-
-                rows.forEach(function(row) {
-                    if (! parseInt(row._pmpermissions, 10)) {
-                        row._banned = 1;
-                        row._level = 'member';
-                    } else if (parseInt(row._adminpermissions, 10)) {
-                        row._level = row._gid === admingid ? 'administrator' : 'moderator';
-                        row._banned = 0;
-                    } else {
-                        row._level = 'member';
-                        row._banned = 0;
-                    }
-                    map[row._gid] = row;
-                });
-                // keep a copy of the users in memory here
-                Exporter._groups = map;
-                callback(null, map);
-            });
+        Exporter.fixTables(function() {
+            console.log('fixing posts done');
+            callback(null, Exporter.config());
+        });
     };
 
     Exporter.getUsers = function(callback) {
@@ -97,79 +43,14 @@ var logPrefix = '[nodebb-plugin-import-network54]';
         var startms = +new Date();
 
         var query = 'SELECT '
-            + prefix + 'user.userid as _uid, '
-            + prefix + 'user.email as _email, '
-            + prefix + 'user.username as _username, '
-            + prefix + 'sigparsed.signatureparsed as _signature, '
-            + prefix + 'user.joindate as _joindate, '
-            + prefix + 'user.homepage as _website, '
-            + prefix + 'user.reputation as _reputation, '
-            + prefix + 'user.profilevisits as _profileviews, '
-            + prefix + 'user.birthday as _birthday '
-            + 'FROM ' + prefix + 'user '
-            + 'LEFT JOIN ' + prefix + 'sigparsed ON ' + prefix + 'sigparsed.userid=' + prefix + 'user.userid '
+            + prefix + 'author.id as _uid, '
+            + prefix + 'author.email as _email, '
+            + prefix + 'author.handle as _username, '
+            + prefix + 'author.name as _fullname, '
+            + prefix + 'author.imageUrl as _picture '
+            + 'FROM ' + prefix + 'author '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-
-        if (!Exporter.connection) {
-            err = {error: 'MySQL connection is not setup. Run setup(config) first'};
-            Exporter.error(err.error);
-            return callback(err);
-        }
-
-        getGroups(function(err, groups) {
-            Exporter.connection.query(query,
-                function(err, rows) {
-                    if (err) {
-                        Exporter.error(err);
-                        return callback(err);
-                    }
-
-                    //normalize here
-                    var map = {};
-                    rows.forEach(function(row) {
-                            // nbb forces signatures to be less than 150 chars
-                            // keeping it HTML see https://github.com/akhoury/nodebb-plugin-import#markdown-note
-                            row._signature = Exporter.truncateStr(row._signature || '', 150);
-
-                            // from unix timestamp (s) to JS timestamp (ms)
-                            row._joindate = ((row._joindate || 0) * 1000) || startms;
-
-                            // lower case the email for consistency
-                            row._email = (row._email || '').toLowerCase();
-
-                            // I don't know about you about I noticed a lot my users have incomplete urls, urls like: http://
-                            row._picture = Exporter.validateUrl(row._picture);
-                            row._website = Exporter.validateUrl(row._website);
-
-                            row._level = (groups[row._gid] || {})._level || '';
-                            row._banned = (groups[row._gid] || {})._banned || 0;
-
-                            map[row._uid] = row;
-                    });
-
-                    callback(null, map);
-                });
-        });
-    };
-
-    Exporter.getCategories = function(callback) {
-        return Exporter.getPaginatedCategories(0, -1, callback);
-    };
-    Exporter.getPaginatedCategories = function(start, limit, callback) {
-        callback = !_.isFunction(callback) ? noop : callback;
-
-        var err;
-        var prefix = Exporter.config('prefix');
-        var startms = +new Date();
-
-        var query = 'SELECT '
-            + prefix + 'forum.forumid as _cid, '
-            + prefix + 'forum.title as _name, '
-            + prefix + 'forum.description as _description, '
-            + prefix + 'forum.displayorder as _order '
-            + 'FROM ' + prefix + 'forum ' // filter added later
-            + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
@@ -183,16 +64,55 @@ var logPrefix = '[nodebb-plugin-import-network54]';
                     Exporter.error(err);
                     return callback(err);
                 }
-
                 //normalize here
                 var map = {};
                 rows.forEach(function(row) {
-                    row._name = row._name || 'Untitled Category '
-                    row._description = row._description || 'No decsciption available';
-                    row._timestamp = ((row._timestamp || 0) * 1000) || startms;
-                    map[row._cid] = row;
+                    // lower case the email for consistency
+                    row._email = (row._email || '').toLowerCase();
+                    row._picture = Exporter.validateUrl(row._picture);
+                    map[row._uid] = row;
                 });
+                callback(null, map);
+            });
+    };
 
+    Exporter.getCategories = function(callback) {
+        return Exporter.getPaginatedCategories(0, -1, callback);
+    };
+    Exporter.getPaginatedCategories = function(start, limit, callback) {
+        callback = !_.isFunction(callback) ? noop : callback;
+
+        var err;
+        var prefix = Exporter.config('prefix');
+        var startms = +new Date();
+        var query = 'SELECT '
+            + prefix + 'categories.cid as _cid, '
+            + prefix + 'categories.name as _name, '
+            + prefix + 'categories.description as _description '
+            + 'FROM ' + prefix + 'categories '
+            + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
+
+
+        if (!Exporter.connection) {
+            err = {error: 'MySQL connection is not setup. Run setup(config) first'};
+            Exporter.error(err.error);
+            return callback(err);
+        }
+
+        Exporter.connection.query(query,
+            function(err, rows) {
+                if (err) {
+                    Exporter.error(err);
+                    return callback(err);
+                }
+                //normalize here
+                var map = {};
+                rows.forEach(function(row) {
+                    row._name = row._name ? row._name[0].toUpperCase() + row._name.substr(1) : 'Untitled';
+                    row._description = row._description || 'No description set';
+                    row._timestamp = ((row._timestamp || 0) * 1000) || startms;
+                    map[row._tid] = row;
+                });
                 callback(null, map);
             });
     };
@@ -207,18 +127,15 @@ var logPrefix = '[nodebb-plugin-import-network54]';
         var prefix = Exporter.config('prefix');
         var startms = +new Date();
         var query = 'SELECT '
-            + prefix + 'thread.threadid as _tid, '
-            + prefix + 'post.userid as _uid, '
-            + prefix + 'thread.forumid as _cid, '
-            + prefix + 'post.title as _title, '
-            + prefix + 'post.pagetext as _content, '
-            + prefix + 'post.dateline as _timestamp, '
-            + prefix + 'thread.views as _viewscount, '
-            + prefix + 'thread.open as _open, '
-            + prefix + 'thread.deletedcount as _deleted, '
-            + prefix + 'thread.sticky as _pinned '
-            + 'FROM ' + prefix + 'thread '
-            + 'JOIN ' + prefix + 'post ON ' + prefix + 'thread.firstpostid=' + prefix + 'post.postid '
+            + prefix + 'topics.tid as _tid, '
+            + prefix + 'topics.uid as _uid, '
+            + prefix + 'topics.title as _title, '
+            + prefix + 'posts.content as _content, '
+            + prefix + 'posts.url as _path, '
+            + prefix + 'posts.fromIP as _ip, '
+            + prefix + 'topics.timestamp as _timestamp '
+            + 'FROM ' + prefix + 'topics '
+            + 'JOIN ' + prefix + 'posts ON ' + prefix + 'topics.mainPid=' + prefix + 'posts.id '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
 
@@ -234,16 +151,24 @@ var logPrefix = '[nodebb-plugin-import-network54]';
                     Exporter.error(err);
                     return callback(err);
                 }
-
                 //normalize here
                 var map = {};
                 rows.forEach(function(row) {
                     row._title = row._title ? row._title[0].toUpperCase() + row._title.substr(1) : 'Untitled';
                     row._timestamp = ((row._timestamp || 0) * 1000) || startms;
-                    row._locked = row._open ? 0 : 1;
+                    row._cid = 1;
+                    row._content = row._content || '...';
+
+                    row._author_name = row._author_name || '';
+                    if (! row._author_handle) {
+                        var m = row._author_name.match(/(.*)\(no login\)/);
+                        if (m && m.length) {
+                            row._guest = m[1];
+                        }
+                    }
+
                     map[row._tid] = row;
                 });
-
                 callback(null, map);
             });
     };
@@ -253,40 +178,23 @@ var logPrefix = '[nodebb-plugin-import-network54]';
     };
     Exporter.getPaginatedPosts = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
-
-        /*
-        network54 post schema
-CREATE TABLE `posts` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `content` text,
-  `fromIP` varchar(255) DEFAULT NULL,
-  `fullTitle` varchar(255) DEFAULT NULL,
-  `isTopPost` bit(1) DEFAULT NULL,        // IF ITS NULL NORMAL POST ELSE TOPIC
-  `legacyId` bigint(20) DEFAULT NULL,
-  `timestamp` bigint(20) DEFAULT NULL,
-  `url` varchar(255) DEFAULT NULL,
-  `author_id` int(11) DEFAULT NULL,
-  `parent_post_id` int(11) DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `ix_url` (`url`),
-  KEY `FK_5srofo2nnf15n2hj8fb4qity7` (`author_id`),
-  KEY `FK_m4vnw2pq586dokmiu3tqemnqf` (`parent_post_id`),
-  CONSTRAINT `FK_5srofo2nnf15n2hj8fb4qity7` FOREIGN KEY (`author_id`) REFERENCES `author` (`id`),
-  CONSTRAINT `FK_m4vnw2pq586dokmiu3tqemnqf` FOREIGN KEY (`parent_post_id`) REFERENCES `posts` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=44124 DEFAULT CHARSET=latin1;
-        */
-
-
         var err;
         var prefix = Exporter.config('prefix');
         var startms = +new Date();
         var query = 'SELECT '
-            + prefix + 'id as _pid, '
-            + prefix + 'post.threadid as _tid, '   // WHERE DO WE GET THIS ?? -baris
-            + prefix + 'author_id as _uid, '
-            + prefix + 'content as _content, '
-            + prefix + 'timestamp as _timestamp '
-            + 'FROM ' + prefix + 'posts WHERE ' + prefix + 'isTopPost IS NULL '
+            + prefix + 'posts.id as _pid, '
+            + prefix + 'posts.tid as _tid, '
+            + prefix + 'posts.author_id as _uid, '
+            + prefix + 'posts.url as _path, '
+            + prefix + 'posts.fromIP as _ip, '
+            + prefix + 'author.name as _author_name, '
+            + prefix + 'author.handle as _author_handle, '
+            + prefix + 'posts.parent_post_id as _toPid, '
+            + 'CONCAT(' + prefix + 'posts.fullTitle' + ', \'\n\', ' + prefix + 'posts.content' + ')' + ' as _content, '
+            + prefix + 'posts.timestamp as _timestamp '
+            + 'FROM ' + prefix + 'posts '
+            + 'JOIN ' + prefix + 'author ON ' + prefix + 'posts.author_id=' + prefix + 'author.id '
+            + 'WHERE ' + prefix + 'posts.isTopPost IS NULL '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
         if (!Exporter.connection) {
@@ -305,8 +213,16 @@ CREATE TABLE `posts` (
                 //normalize here
                 var map = {};
                 rows.forEach(function(row) {
-                    row._content = row._content || '';
-                    row._timestamp = ((row._timestamp || 0) * 1000) || startms;
+                    row._uid = row._uid || 0;
+                    row._content = row._content || '...';
+                    row._timestamp = row._timestamp || startms;
+                    row._author_name = row._author_name || '';
+                    if (! row._author_handle) {
+                        var m = row._author_name.match(/(.*)\(no login\)/);
+                        if (m && m.length) {
+                            row._guest = m[1];
+                        }
+                    }
                     map[row._pid] = row;
                 });
 
@@ -315,10 +231,7 @@ CREATE TABLE `posts` (
     };
 
     Exporter.teardown = function(callback) {
-        Exporter.log('teardown');
         Exporter.connection.end();
-
-        Exporter.log('Done');
         callback();
     };
 
@@ -401,28 +314,32 @@ CREATE TABLE `posts` (
         return Exporter._config;
     };
 
-    Exporter.fixPostsTable = function(callback) {
+    Exporter.fixTables = function(callback) {
         /*
-            This utility method goes through the "posts" table and:
-              * extracts the topics to a "topics" table
-              * adds a "topic_id" column to the "posts" table
-        */
+         This utility method goes through the "posts" table and:
+         * extracts the topics to a "topics" table
+         * adds a "topic_id" column to the "posts" table
+         */
         callback = !_.isFunction(callback) ? noop : callback;
 
         var err;
         var prefix = Exporter.config('prefix');
         var // CREATE TABLE topics ( tid int(10) AUTO_INCREMENT PRIMARY KEY, mainPid int(10), uid int(10), title varchar(255), timestamp varchar(10) );
             query1 = 'CREATE TABLE ' + prefix + 'topics ( tid int(10) AUTO_INCREMENT PRIMARY KEY, mainPid int(10), uid int(10), title varchar(255), timestamp varchar(10) );',
-            // INSERT INTO topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM posts WHERE isTopPost="1" ORDER BY timestamp ASC)
+        // INSERT INTO topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM posts WHERE isTopPost="1" ORDER BY timestamp ASC)
             query2 = 'INSERT INTO ' + prefix + 'topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM ' + prefix + 'posts WHERE isTopPost="1" ORDER BY timestamp ASC)',
-            // SELECT mainPid, tid FROM `topics`
+        // SELECT mainPid, tid FROM `topics`
             query3 = 'SELECT mainPid, tid FROM `' + prefix + 'topics`',
             query4 = 'ALTER TABLE ' + prefix + 'posts ADD COLUMN tid int(10) AFTER id',
             query5 = 'SELECT id, parent_post_id AS toPid FROM ' + prefix + 'posts WHERE parent_post_id IS NOT NULL AND isTopPost IS NULL',
             query6 = 'CREATE TABLE ' + prefix + 'temp ( pid int(10), tid int(10) )',
             query7 = 'INSERT INTO ' + prefix + 'temp VALUES ',
-            query8 = 'UPDATE ' + prefix + 'posts, ' + prefix + 'temp SET ' + prefix + 'posts.tid = ' + prefix + 'temp.tid WHERE ' + prefix + 'posts.id=' + prefix + 'temp.pid;';
-        var mainPidToTid = {},
+            query8 = 'UPDATE ' + prefix + 'posts, ' + prefix + 'temp SET ' + prefix + 'posts.tid = ' + prefix + 'temp.tid WHERE ' + prefix + 'posts.id=' + prefix + 'temp.pid;',
+
+            query9 = 'CREATE TABLE ' + prefix + 'categories ( cid int(10), name varchar(255), description varchar(255) )',
+            query10 = 'INSERT INTO ' + prefix + 'categories VALUES ( 1, "Untitled Category", "No description set" ) ',
+
+            mainPidToTid = {},
             pidToTid = {};
 
         if (!Exporter.connection) {
@@ -432,6 +349,42 @@ CREATE TABLE `posts` (
         }
 
         async.waterfall([
+            function(next) {
+                console.log('dropping column tid');
+                Exporter.connection.query('ALTER TABLE posts DROP COLUMN tid', function() {
+                    next(); // dont care if errors
+                });
+            },
+            function(next) {
+                console.log('dropping topics');
+                Exporter.connection.query('DROP TABLE IF EXISTS topics', function() {
+                    next();
+                });
+            },
+            function(next) {
+                console.log('dropping temp');
+                Exporter.connection.query('DROP TABLE IF EXISTS temp', function() {
+                    next();
+                });
+            },
+            function(next) {
+                console.log('dropping fake categories');
+                Exporter.connection.query('DROP TABLE IF EXISTS categories', function() {
+                    next();
+                });
+            },
+            function(next) {
+                console.log('Creating categories table');
+                Exporter.connection.query(query9, function() {
+                    next();
+                });
+            },
+            function(next) {
+                console.log('Populating categories table');
+                Exporter.connection.query(query10, function() {
+                    next();
+                });
+            },
             function(next) {
                 console.log('Creating topics table');
                 Exporter.connection.query(query1, next);

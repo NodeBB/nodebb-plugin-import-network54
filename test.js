@@ -6,8 +6,9 @@ require('./index').testrun({
     dbname: 'network54',
     dbuser: 'user',
     dbpass: 'password',
-
-    tablePrefix: 'vb_'
+    tablePrefix: ''
 }, function(err, results) {
     fs.writeFileSync('./tmp.json', JSON.stringify(results, undefined, 2));
+    console.log('testrun done');
+    process.exit();
 });
