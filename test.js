@@ -3,7 +3,7 @@ var fs = require('fs-extra');
 require('./index').testrun({
     dbhost: 'localhost',
     dbport: 3306,
-    dbname: 'vbulletin',
+    dbname: 'network54',
     dbuser: 'user',
     dbpass: 'password',
 

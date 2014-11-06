@@ -1,13 +1,13 @@
 {
-    	"id": "nodebb-plugin-import-vbulletin",
-    	"name": "nodebb-plugin-import-vbulletin",
-    	"description": "A VBulletin to NodeBB data exporter",
-    	"url": "https://github.com/akhoury/nodebb-plugin-import-vbulletin",
+	"id": "nodebb-plugin-import-network54",
+	"name": "nodebb-plugin-import-network54",
+	"description": "A Network54 to NodeBB data exporter",
+	"url": "https://github.com/akhoury/nodebb-plugin-import-network54",
 	"library": "./admin/index.js",
 	"hooks": [
 		{ "hook": "filter:admin.header.build", "method": "admin.menu"},
 		{ "hook": "static:app.load", "method": "admin.load"}
 	],
-    	"templates": "./public/templates",
-    	"minver": "0.5.0"
+	"templates": "./public/templates",
+	"minver": "0.5.0"
 }

@@ -3,7 +3,7 @@ var async = require('async');
 var mysql = require('mysql');
 var _ = require('underscore');
 var noop = function(){};
-var logPrefix = '[nodebb-plugin-import-vbulletin]';
+var logPrefix = '[nodebb-plugin-import-network54]';
 
 (function(Exporter) {
 
@@ -17,7 +17,7 @@ var logPrefix = '[nodebb-plugin-import-vbulletin]';
             user: config.dbuser || config.user || 'user',
             password: config.dbpass || config.pass || config.password || 'password',
             port: config.dbport || config.port || 3306,
-            database: config.dbname || config.name || config.database || 'vb'
+            database: config.dbname || config.name || config.database || 'network54'
         };
 
         Exporter.log(_config);
@@ -399,6 +399,103 @@ CREATE TABLE `posts` (
             }
         }
         return Exporter._config;
+    };
+
+    Exporter.fixPostsTable = function(callback) {
+        /*
+            This utility method goes through the "posts" table and:
+              * extracts the topics to a "topics" table
+              * adds a "topic_id" column to the "posts" table
+        */
+        callback = !_.isFunction(callback) ? noop : callback;
+
+        var err;
+        var prefix = Exporter.config('prefix');
+        var // CREATE TABLE topics ( tid int(10) AUTO_INCREMENT PRIMARY KEY, mainPid int(10), uid int(10), title varchar(255), timestamp varchar(10) );
+            query1 = 'CREATE TABLE ' + prefix + 'topics ( tid int(10) AUTO_INCREMENT PRIMARY KEY, mainPid int(10), uid int(10), title varchar(255), timestamp varchar(10) );',
+            // INSERT INTO topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM posts WHERE isTopPost="1" ORDER BY timestamp ASC)
+            query2 = 'INSERT INTO ' + prefix + 'topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM ' + prefix + 'posts WHERE isTopPost="1" ORDER BY timestamp ASC)',
+            // SELECT mainPid, tid FROM `topics`
+            query3 = 'SELECT mainPid, tid FROM `' + prefix + 'topics`',
+            query4 = 'ALTER TABLE posts ADD COLUMN tid int(10) AFTER id',
+            query5 = 'SELECT id, parent_post_id AS toPid FROM ' + prefix + 'posts WHERE parent_post_id IS NOT NULL AND isTopPost IS NULL',
+            query6 = 'CREATE TABLE temp ( pid int(10), tid int(10) )',
+            query7 = 'INSERT INTO temp VALUES ',
+            query8 = 'UPDATE posts, temp SET posts.tid = temp.tid WHERE posts.id=temp.pid;';
+        var mainPidToTid = {},
+            pidToTid = {};
+
+        if (!Exporter.connection) {
+            err = {error: 'MySQL connection is not setup. Run setup(config) first'};
+            Exporter.error(err.error);
+            return callback(err);
+        }
+
+        async.waterfall([
+            function(next) {
+                console.log('Creating topics table');
+                Exporter.connection.query(query1, next);
+            },
+            function(rows, fields, next) {
+                console.log('Copying parent topics into new table');
+                Exporter.connection.query(query2, next);
+            },
+            function(rows, fields, next) {
+                console.log('Grabbing those pids for assignment as mainPids');
+                Exporter.connection.query(query3, next);
+            },
+            function(rows, fields, next) {
+                console.log('Assigning...');
+                for(var x=0,numRows=rows.length;x<numRows;x++) {
+                    mainPidToTid[rows[x]['mainPid']] = rows[x]['tid'];
+                }
+
+                console.log('Done.');
+                next();
+            },
+            function(next) {
+                console.log('Adding tid column to posts table');
+                Exporter.connection.query(query4, next);
+            },
+            function(rows, fields, next) {
+                console.log('Retrieving pids with parent_ids for re-association');
+                Exporter.connection.query(query5, next);
+            },
+            function(rows, fields, next) {
+                var pass = 1,
+                    matches = 0,
+                    tid;
+
+                while(rows.length > 0) {
+                    rows = rows.map(function(row) {
+                        tid = pidToTid[row.toPid] || mainPidToTid[row.toPid];
+                        if (tid) {
+                            pidToTid[row.id] = tid;
+                            matches++;
+                            row = null;
+                        }
+                    }).filter(Boolean);
+                    console.log('[Pass ' + pass + '] ' + matches + ' matches found, ' + rows.length + ' records remaining');
+                }
+
+                next(null, pidToTid);
+            },
+            function(pidToTid, next) {
+                var values = '';
+                for(var pid in pidToTid) {
+                    values = values + ' (' + pid + ', ' + pidToTid[pid] + '),';
+                }
+                Exporter.connection.query(query6, function() {
+                    Exporter.connection.query(query7 + values.slice(0, -1), next);
+                });
+            },
+            function(rows, fields, next) {
+                Exporter.connection.query(query8, next);
+            }
+        ], function(err) {
+            console.log('finished!');
+            callback();
+        });
     };
 
     // from Angular https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L11
