@@ -417,11 +417,11 @@ CREATE TABLE `posts` (
             query2 = 'INSERT INTO ' + prefix + 'topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM ' + prefix + 'posts WHERE isTopPost="1" ORDER BY timestamp ASC)',
             // SELECT mainPid, tid FROM `topics`
             query3 = 'SELECT mainPid, tid FROM `' + prefix + 'topics`',
-            query4 = 'ALTER TABLE posts ADD COLUMN tid int(10) AFTER id',
+            query4 = 'ALTER TABLE ' + prefix + 'posts ADD COLUMN tid int(10) AFTER id',
             query5 = 'SELECT id, parent_post_id AS toPid FROM ' + prefix + 'posts WHERE parent_post_id IS NOT NULL AND isTopPost IS NULL',
-            query6 = 'CREATE TABLE temp ( pid int(10), tid int(10) )',
-            query7 = 'INSERT INTO temp VALUES ',
-            query8 = 'UPDATE posts, temp SET posts.tid = temp.tid WHERE posts.id=temp.pid;';
+            query6 = 'CREATE TABLE ' + prefix + 'temp ( pid int(10), tid int(10) )',
+            query7 = 'INSERT INTO ' + prefix + 'temp VALUES ',
+            query8 = 'UPDATE ' + prefix + 'posts, ' + prefix + 'temp SET ' + prefix + 'posts.tid = ' + prefix + 'temp.tid WHERE ' + prefix + 'posts.id=' + prefix + 'temp.pid;';
         var mainPidToTid = {},
             pidToTid = {};
 
@@ -481,6 +481,7 @@ CREATE TABLE `posts` (
                 next(null, pidToTid);
             },
             function(pidToTid, next) {
+                console.log('Creating temp table');
                 var values = '';
                 for(var pid in pidToTid) {
                     values = values + ' (' + pid + ', ' + pidToTid[pid] + '),';
@@ -490,12 +491,10 @@ CREATE TABLE `posts` (
                 });
             },
             function(rows, fields, next) {
+                console.log('Adding tids into the posts table');
                 Exporter.connection.query(query8, next);
             }
-        ], function(err) {
-            console.log('finished!');
-            callback();
-        });
+        ], callback);
     };
 
     // from Angular https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L11
