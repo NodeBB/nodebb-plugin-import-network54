@@ -1,6 +1,6 @@
 var fs = require('fs-extra');
 
-require('./index').testrun({
+require('./index').setup({
     dbhost: 'localhost',
     dbport: 3306,
     dbname: 'network54',

@@ -1,6 +1,8 @@
 
 var async = require('async');
 var mysql = require('mysql');
+var mysql2 = require('mysql2');
+var fs = require('fs-extra');
 var _ = require('underscore');
 var noop = function(){};
 var logPrefix = '[nodebb-plugin-import-network54]';
@@ -24,12 +26,20 @@ var logPrefix = '[nodebb-plugin-import-network54]';
         Exporter.config('prefix', config.prefix || config.tablePrefix || '');
 
         Exporter.connection = mysql.createConnection(_config);
+        Exporter.connection2 = mysql2.createConnection(_config);
+
         Exporter.connection.connect();
 
-        Exporter.fixTables(function() {
-            console.log('fixing posts done');
+        if (!config.skipFix) {
+            Exporter.fixTables(function(err) {
+                console.log('fixTables done');
+                console.log('setup done');
+                callback(err, Exporter.config());
+            });
+        } else {
+            console.log('setup done');
             callback(null, Exporter.config());
-        });
+        }
     };
 
     Exporter.getUsers = function(callback) {
@@ -58,6 +68,7 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             return callback(err);
         }
 
+        console.log(query);
         Exporter.connection.query(query,
             function(err, rows) {
                 if (err) {
@@ -99,6 +110,7 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             return callback(err);
         }
 
+        console.log(query);
         Exporter.connection.query(query,
             function(err, rows) {
                 if (err) {
@@ -130,6 +142,7 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             + prefix + 'topics.tid as _tid, '
             + prefix + 'topics.uid as _uid, '
             + prefix + 'topics.title as _title, '
+            + prefix + 'topics.mainPid as _mainPid, '
             + prefix + 'posts.content as _content, '
             + prefix + 'posts.url as _path, '
             + prefix + 'posts.fromIP as _ip, '
@@ -145,6 +158,7 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             return callback(err);
         }
 
+        console.log(query);
         Exporter.connection.query(query,
             function(err, rows) {
                 if (err) {
@@ -153,12 +167,10 @@ var logPrefix = '[nodebb-plugin-import-network54]';
                 }
                 //normalize here
                 var map = {};
-                rows.forEach(function(row) {
-                    row._title = row._title ? row._title[0].toUpperCase() + row._title.substr(1) : 'Untitled';
+                rows.forEach(function(row, i) {
                     row._timestamp = ((row._timestamp || 0) * 1000) || startms;
                     row._cid = 1;
-                    row._content = row._content || '...';
-
+                    row._ip = (row._ip || '').trim();
                     row._author_name = row._author_name || '';
                     if (! row._author_handle) {
                         var m = row._author_name.match(/(.*)\(no login\)/);
@@ -190,7 +202,7 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             + prefix + 'author.name as _author_name, '
             + prefix + 'author.handle as _author_handle, '
             + prefix + 'posts.parent_post_id as _toPid, '
-            + 'CONCAT(' + prefix + 'posts.fullTitle' + ', \'\n\', ' + prefix + 'posts.content' + ')' + ' as _content, '
+            + 'CONCAT(' + prefix + 'posts.fullTitle' + ', \'\n\n\', ' + prefix + 'posts.content' + ')' + ' as _content, '
             + prefix + 'posts.timestamp as _timestamp '
             + 'FROM ' + prefix + 'posts '
             + 'JOIN ' + prefix + 'author ON ' + prefix + 'posts.author_id=' + prefix + 'author.id '
@@ -203,6 +215,7 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             return callback(err);
         }
 
+        console.log(query);
         Exporter.connection.query(query,
             function(err, rows) {
                 if (err) {
@@ -214,8 +227,8 @@ var logPrefix = '[nodebb-plugin-import-network54]';
                 var map = {};
                 rows.forEach(function(row) {
                     row._uid = row._uid || 0;
-                    row._content = row._content || '...';
                     row._timestamp = row._timestamp || startms;
+                    row._ip = (row._ip || '').trim();
                     row._author_name = row._author_name || '';
                     if (! row._author_handle) {
                         var m = row._author_name.match(/(.*)\(no login\)/);
@@ -238,21 +251,27 @@ var logPrefix = '[nodebb-plugin-import-network54]';
     Exporter.testrun = function(config, callback) {
         async.series([
             function(next) {
+                console.log("setup started");
                 Exporter.setup(config, next);
             },
             function(next) {
+                console.log("getUsers started");
                 Exporter.getUsers(next);
             },
             function(next) {
+                console.log("getCategories started");
                 Exporter.getCategories(next);
             },
             function(next) {
+                console.log("getTopics started");
                 Exporter.getTopics(next);
             },
             function(next) {
+                console.log("getPosts started");
                 Exporter.getPosts(next);
             },
             function(next) {
+                console.log("teardown started");
                 Exporter.teardown(next);
             }
         ], callback);
@@ -327,17 +346,17 @@ var logPrefix = '[nodebb-plugin-import-network54]';
         var // CREATE TABLE topics ( tid int(10) AUTO_INCREMENT PRIMARY KEY, mainPid int(10), uid int(10), title varchar(255), timestamp varchar(10) );
             query1 = 'CREATE TABLE ' + prefix + 'topics ( tid int(10) AUTO_INCREMENT PRIMARY KEY, mainPid int(10), uid int(10), title varchar(255), timestamp varchar(10) );',
         // INSERT INTO topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM posts WHERE isTopPost="1" ORDER BY timestamp ASC)
-            query2 = 'INSERT INTO ' + prefix + 'topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM ' + prefix + 'posts WHERE isTopPost="1" ORDER BY timestamp ASC)',
+            query2 = 'INSERT INTO ' + prefix + 'topics (mainPid, uid, title, timestamp) (SELECT id AS tid, author_id AS uid, fullTitle AS title, timestamp FROM ' + prefix + 'posts WHERE isTopPost IS NOT NULL ORDER BY timestamp ASC)',
         // SELECT mainPid, tid FROM `topics`
             query3 = 'SELECT mainPid, tid FROM `' + prefix + 'topics`',
             query4 = 'ALTER TABLE ' + prefix + 'posts ADD COLUMN tid int(10) AFTER id',
             query5 = 'SELECT id, parent_post_id AS toPid FROM ' + prefix + 'posts WHERE parent_post_id IS NOT NULL AND isTopPost IS NULL',
             query6 = 'CREATE TABLE ' + prefix + 'temp ( pid int(10), tid int(10) )',
-            query7 = 'INSERT INTO ' + prefix + 'temp VALUES ',
+            query7 = 'INSERT INTO `' + prefix + 'temp` VALUES ',
             query8 = 'UPDATE ' + prefix + 'posts, ' + prefix + 'temp SET ' + prefix + 'posts.tid = ' + prefix + 'temp.tid WHERE ' + prefix + 'posts.id=' + prefix + 'temp.pid;',
 
-            query9 = 'CREATE TABLE ' + prefix + 'categories ( cid int(10), name varchar(255), description varchar(255) )',
-            query10 = 'INSERT INTO ' + prefix + 'categories VALUES ( 1, "Untitled Category", "No description set" ) ',
+            query0a = 'CREATE TABLE ' + prefix + 'categories ( cid int(10), name varchar(255), description varchar(255) )',
+            query0b = 'INSERT INTO ' + prefix + 'categories VALUES ( 1, "Untitled Category", "No description set" ) ',
 
             mainPidToTid = {},
             pidToTid = {};
@@ -348,7 +367,7 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             return callback(err);
         }
 
-        async.waterfall([
+        async.series([
             function(next) {
                 console.log('dropping column tid');
                 Exporter.connection.query('ALTER TABLE posts DROP COLUMN tid', function() {
@@ -375,13 +394,13 @@ var logPrefix = '[nodebb-plugin-import-network54]';
             },
             function(next) {
                 console.log('Creating categories table');
-                Exporter.connection.query(query9, function() {
+                Exporter.connection.query(query0a, function() {
                     next();
                 });
             },
             function(next) {
                 console.log('Populating categories table');
-                Exporter.connection.query(query10, function() {
+                Exporter.connection.query(query0b, function() {
                     next();
                 });
             },
@@ -389,68 +408,152 @@ var logPrefix = '[nodebb-plugin-import-network54]';
                 console.log('Creating topics table');
                 Exporter.connection.query(query1, next);
             },
-            function(rows, fields, next) {
-                console.log('Copying parent topics into new table');
-                Exporter.connection.query(query2, next);
+            function(next) {
+                console.log('populating topics table');
+                Exporter.connection.query(query2, function(err) {
+                    if (err) {
+                        console.log(err);
+                        next(err);
+                    } else {
+                        console.log('done-populating topics table');
+                        next();
+                    }
+                });
             },
-            function(rows, fields, next) {
+            function(next) {
                 console.log('Grabbing those pids for assignment as mainPids');
-                Exporter.connection.query(query3, next);
-            },
-            function(rows, fields, next) {
-                console.log('Assigning...');
-                for(var x=0,numRows=rows.length;x<numRows;x++) {
-                    mainPidToTid[rows[x]['mainPid']] = rows[x]['tid'];
-                }
-
-                console.log('Done.');
-                next();
+                Exporter.connection.query(query3, function(err, rows, fields) {
+                    if (err) {
+                        console.log(err);
+                        next(err);
+                    } else {
+                        console.log('Assigning...');
+                        for(var x=0,numRows=rows.length;x<numRows;x++) {
+                            mainPidToTid[rows[x]['mainPid']] = rows[x]['tid'];
+                        }
+                        console.log('Done.');
+                        next();
+                    }
+                });
             },
             function(next) {
                 console.log('Adding tid column to posts table');
-                Exporter.connection.query(query4, next);
-            },
-            function(rows, fields, next) {
-                console.log('Retrieving pids with parent_ids for re-association');
-                Exporter.connection.query(query5, next);
-            },
-            function(rows, fields, next) {
-                var pass = 1,
-                    matches = 0,
-                    tid;
-
-                while(rows.length > 0) {
-                    rows = rows.map(function(row) {
-                        tid = pidToTid[row.toPid] || mainPidToTid[row.toPid];
-                        if (tid) {
-                            pidToTid[row.id] = tid;
-                            matches++;
-                            row = null;
-                        }
-                    }).filter(Boolean);
-                    console.log('[Pass ' + pass + '] ' + matches + ' matches found, ' + rows.length + ' records remaining');
-                }
-
-                next(null, pidToTid);
-            },
-            function(pidToTid, next) {
-                console.log('Creating temp table');
-                var values = '';
-                for(var pid in pidToTid) {
-                    values = values + ' (' + pid + ', ' + pidToTid[pid] + '),';
-                }
-                Exporter.connection.query(query6, function() {
-                    Exporter.connection.query(query7 + values.slice(0, -1), next);
+                Exporter.connection.query(query4, function(err) {
+                    if (err) {
+                        console.log(err);
+                        next(err);
+                    } else {
+                        console.log('done-Adding tid column to posts table');
+                        next();
+                    }
                 });
             },
-            function(rows, fields, next) {
-                console.log('Adding tids into the posts table');
-                Exporter.connection.query(query8, next);
+            function(next) {
+                console.log('Retrieving pids with parent_ids for re-association');
+                Exporter.connection.query(query5, function(err, rows, fields) {
+                    if (err) return next(err);
+                    var pass = 1,
+                        matches = 0,
+                        tid;
+
+                    while(rows.length > 0) {
+                        rows = rows.map(function(row) {
+                            tid = pidToTid[row.toPid] || mainPidToTid[row.toPid];
+                            if (tid) {
+                                pidToTid[row.id] = tid;
+                                matches++;
+                                row = null;
+                            }
+                        }).filter(Boolean);
+                        console.log('[Pass ' + pass + '] ' + matches + ' matches found, ' + rows.length + ' records remaining');
+                    }
+
+                    next(null);
+                });
+            },
+            function(next) {
+                console.log('query6-Creating temp table');
+                Exporter.connection.query(query6, function(err) {
+                    if (err) {
+                        console.log(err);
+                        console.log("query6 :" +  query6);
+                    } else {
+                        console.log('query6-done-Creating temp table.');
+
+                        var keys = Object.keys(pidToTid);
+                        var getKeysRange = function(start, end) {
+                            return keys.slice(start, end).filter(function(v) { return !!v; }) || [];
+                        };
+
+                        var run = 0;
+                        var batch = 1000;
+                        var start = 0;
+                        var end = batch;
+                        var done = false;
+
+                        async.whilst(
+                            function(err) {
+                                if (err) {
+                                    console.log(err);
+                                    return true;
+                                }
+                                return !done;
+                            },
+                            function(nxt) {
+                                var ids = getKeysRange(start, end);
+                                if (!ids.length) {
+                                    done = true;
+                                    return nxt();
+                                }
+
+                                var values = '';
+                                for(var i = 0; i < ids.length; i++) {
+                                    values += ' (' + ids[i] + ', ' + pidToTid[ids[i]] + ')' + (i === ids.length - 1 ? '' : ',');
+                                }
+
+                                Exporter.connection.query(query7 + values, function(err) {
+                                    if (err) {
+                                        console.log("query7: " + query7);
+                                    } else {
+                                        console.log('done-query7:run' + run++);
+                                    }
+                                    if (err) {
+                                        return nxt(err);
+                                    }
+                                    start += batch + 1;
+                                    end = start + batch;
+                                    nxt();
+                                });
+                            },
+                            function(err) {
+                                if (err) {
+                                    console.log("q7:err", err);
+                                    return next();
+                                }
+                                console.log("q7:done");
+                                next();
+                            }
+                        );
+                    }
+                });
+            },
+            function(next) {
+                console.log('query8-Adding tids into the posts table');
+                Exporter.connection.query(query8, function(err) {
+                    if (err) {
+                        console.log(err);
+                        console.log(query8);
+                        next(err);
+                    } else {
+                        console.log('query8-done-Adding tids into the posts table');
+                        next();
+                    }
+                });
             }
         ], callback);
     };
 
-    // from Angular https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L11
+// from Angular https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L11
     Exporter.validateUrl = function(url) {
         var pattern = /^(ftp|http|https):\/\/(\w+:{0,1}\w*@)?(\S+)(:[0-9]+)?(\/|\/([\w#!:.?+=&%@!\-\/]))?$/;
         return url && url.length < 2083 && url.match(pattern) ? url : '';
