@@ -1,6 +1,6 @@
 {
     "name": "nodebb-plugin-import-network54",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "description": "A Network54 to NodeBB data exporter",
     "main": "./index.js",
     "repository": {
